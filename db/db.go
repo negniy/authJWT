@@ -3,22 +3,30 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
 
 	_ "github.com/lib/pq"
-)
-
-const (
-	host     = "localhost"
-	port     = 5432
-	user     = "postgres"
-	password = "1"
-	dbname   = "auth_db"
 )
 
 var db *sql.DB
 
 func InitDB() error {
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+
+	host := os.Getenv("POSTGRES_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+
+	port := os.Getenv("POSTGRES_PORT")
+	if port == "" {
+		port = "5432"
+	}
+
+	user := os.Getenv("POSTGRES_USER")
+	password := os.Getenv("POSTGRES_PASSWORD")
+	dbname := os.Getenv("POSTGRES_DB")
+
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
 
 	var err error
@@ -33,15 +41,26 @@ func InitDB() error {
 	}
 
 	_, err = db.Exec(`
-        CREATE TABLE IF NOT EXISTS refresh_tokens (
-			guid INTEGER NOT NULL,
-			refresh_hash TEXT NOT NULL,
-			jti TEXT NOT NULL,
-			expires_at TIMESTAMP NOT NULL,
-			PRIMARY KEY (guid, jti),
-			FOREIGN KEY (guid) REFERENCES users(guid) ON DELETE CASCADE
-		);
-    `)
+	CREATE TABLE IF NOT EXISTS users (
+		guid INTEGER PRIMARY KEY,
+		email TEXT
+	);
+`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS refresh_tokens (
+		guid INTEGER NOT NULL,
+		refresh_hash TEXT NOT NULL,
+		jti TEXT NOT NULL,
+		expires_at TIMESTAMP NOT NULL,
+		user_agent TEXT NOT NULL,
+		PRIMARY KEY (guid, jti),
+		FOREIGN KEY (guid) REFERENCES users(guid) ON DELETE CASCADE
+	);
+`)
 	return err
 }
 
@@ -57,11 +76,11 @@ func CheckUID(guid int) error {
 	return nil
 }
 
-func SaveRefreshToken(guid int, refreshHash string, jti string) error {
+func SaveRefreshToken(guid int, refreshHash string, jti string, userAgent string) error {
 	_, err := db.Exec(`
-		INSERT INTO refresh_tokens (guid, refresh_hash, jti, expires_at)
-		VALUES ($1, $2, $3, NOW() + INTERVAL '7 days')
-	`, guid, refreshHash, jti)
+		INSERT INTO refresh_tokens (guid, refresh_hash, jti, expires_at, user_agent)
+		VALUES ($1, $2, $3, NOW() + INTERVAL '7 days', $4)
+	`, guid, refreshHash, jti, userAgent)
 	if err != nil {
 		return fmt.Errorf("ошибка сохранения refresh токена: %w", err)
 	}
@@ -94,11 +113,14 @@ func DeleteRefreshToken(guid int, jti string) error {
 	return nil
 }
 
-func GetUserEmail(guid int) (string, error) {
-	var email string
-	err := db.QueryRow(`SELECT email FROM users WHERE guid = $1`, guid).Scan(&email)
+func GetUserAgent(guid int, jti string) (string, error) {
+	var userAgent string
+	err := db.QueryRow(`
+		SELECT user_agent FROM refresh_tokens
+		WHERE guid = $1 AND jti = $2
+	`, guid, jti).Scan(&userAgent)
 	if err != nil {
-		return "", fmt.Errorf("ошибка получения email пользователя: %w", err)
+		return "", fmt.Errorf("ошибка получения user-agent: %w", err)
 	}
-	return email, nil
+	return userAgent, nil
 }
