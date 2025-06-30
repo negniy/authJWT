@@ -1,114 +1,90 @@
-# authJWT
 
-authJWT — это минималистичный сервер авторизации на Go, реализующий выдачу и обновление JWT-токенов с использованием access и refresh пар. Проект демонстрирует принципы безопасной аутентификации, хранения refresh-токенов и защиты по IP-адресу.
+# AuthJWT
 
-## Основной функционал
+`AuthJWT` — это микросервис аутентификации и авторизации, реализующий выдачу, обновление и деавторизацию JWT-токенов. Поддерживается работа с access/refresh токенами, верификация IP и User-Agent клиента, а также webhook-оповещения при подозрительной активности.
 
-- Выдача пары access/refresh токенов
-- Хранение refresh-токенов в базе данных с bcrypt-хешированием
-- Проверка IP-адреса клиента при обновлении токенов
-- JWT-токены подписаны алгоритмом HMAC SHA256 (HS256)
-- Обработка jti для защиты от повторного использования refresh-токенов
+## Особенности
 
-## Стек технологий
+- Генерация пары токенов `access + refresh` с привязкой к IP и User-Agent
+- Обновление access-токена по refresh-токену
+- Защита от подмены User-Agent и IP
+- Удаление refresh-токена (logout)
+- Поддержка Swagger-документации
+- Docker-сборка и запуск через `docker-compose`
 
-- Go
+## Эндпоинты API
+
+| Метод | Путь       | Описание                                      |
+|-------|------------|-----------------------------------------------|
+| POST  | `/tokens`  | Получить новую пару токенов по GUID          |
+| POST  | `/refresh` | Обновить токены по refresh-токену            |
+| GET   | `/whoami`  | Получить текущий GUID по access-токену       |
+| POST  | `/logout`  | Деавторизация, удаление refresh-токена       |
+
+## Документация API
+
+Swagger-документация доступна по адресу:
+
+```
+
+[http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html)
+
+````
+
+Включает описание:
+- Структур запросов и ответов
+- Возможных кодов ошибок
+- Примеров тел запросов и ответов
+
+## Запуск
+
+### Требования
+
+- Go 1.20+
+- Docker и Docker Compose
 - PostgreSQL
-- Gorilla Mux
-- golang-jwt/jwt
-- bcrypt
-- стандартная библиотека
+
+### Сборка и запуск
+
+```bash
+docker-compose up --build -d
+````
+
+Приложение будет доступно на `http://localhost:8080`.
+
+### Переменные окружения
+
+| Переменная         | Описание                                                        |
+|--------------------|-----------------------------------------------------------------|
+| `WEBHOOK_URL`      | URL, на который отправляются POST-запросы при смене IP         |
+| `JWT_SECRET`       | Секретный ключ для подписи JWT-токенов (в base64 или строка)   |
+| `DB_HOST`          | Адрес хоста базы данных                                        |
+| `DB_PORT`          | Порт PostgreSQL                                                |
+| `DB_USER`          | Имя пользователя БД                                            |
+| `DB_PASSWORD`      | Пароль пользователя БД                                         |
+| `DB_NAME`          | Название базы данных                                           |
+
+#### Пример `.env` файла:
+
+```env
+WEBHOOK_URL=https://example.com/webhook
+JWT_SECRET=my_secret_key
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME=auth_db
 
 ## Структура проекта
 
 ```
-
 authJWT/
-├── db/            // Подключение к БД и работа с токенами
-├── handlers/      // HTTP-обработчики: выдача и обновление токенов
-├── models/        // Модели для JSON
-├── main.go        // Точка входа
-├── go.mod / sum   // Зависимости
-
-````
-
-## Таблицы в базе данных
-
-> Требуется таблица `users`, содержащая как минимум поле `guid INTEGER PRIMARY KEY`.
-
-`refresh_tokens` создаётся автоматически при первом запуске:
-
-```sql
-CREATE TABLE IF NOT EXISTS refresh_tokens (
-  guid INTEGER NOT NULL,
-  refresh_hash TEXT NOT NULL,
-  jti TEXT NOT NULL,
-  expires_at TIMESTAMP NOT NULL,
-  PRIMARY KEY (guid, jti),
-  FOREIGN KEY (guid) REFERENCES users(guid) ON DELETE CASCADE
-);
-````
-
-## Установка и запуск
-
-1. Настройте PostgreSQL и создайте базу данных `auth_db`, таблицу `users`
-2. Обновите параметры подключения в `db/db.go` (хост, порт, логин, пароль)
-3. Установите зависимости:
-
-```bash
-go mod tidy
+├── cmd/             # main.go
+├── handlers/        # HTTP-обработчики
+├── models/          # Структуры данных
+├── db/              # Работа с БД
+├── docs/            # Swagger-документация
+├── Dockerfile
+├── docker-compose.yml
+└── README.md
 ```
-
-4. Запустите сервер:
-
-```bash
-go run main.go
-```
-
-Сервер стартует на `localhost:8080`
-
-## Маршруты
-
-### `POST /tokens?guid=123`
-
-Выдаёт пару `access_token` и `refresh_token` для существующего пользователя.
-
-Ответ:
-
-```json
-{
-  "access_token": "string",
-  "refresh_token": "string"
-}
-```
-
-### `POST /refresh`
-
-Тело запроса:
-
-```json
-{
-  "access_token": "string",
-  "refresh_token": "string"
-}
-```
-
-Ответ:
-
-```json
-{
-  "access_token": "new string",
-  "refresh_token": "new string"
-}
-```
-
-## Принцип работы
-
-* Access-токен действителен 15 минут, содержит IP-адрес, jti и guid
-* Refresh-токен хранится в базе в виде bcrypt-хэша и привязан к jti
-* При обновлении:
-
-  * сравнивается IP
-  * проверяется совпадение refresh по bcrypt
-  * старый токен удаляется
-  * создаётся новый jti и сохраняется новая пара
