@@ -25,11 +25,8 @@
 
 Swagger-документация доступна по адресу:
 
-```
-
 [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html)
 
-````
 
 Включает описание:
 - Структур запросов и ответов
